@@ -31,8 +31,8 @@ Examples
 
 Generate 'hello_world.wav' test file with default parameters in current directory:
 
-	./morsewav.py -o hellow_world.wav hello world
+	./morsewav.py -o hello_world.wav hello world
 
-Convert a book text file into a morse wav file with additional letter spacing (Farnsworth)
+Convert a book text file into a morse wav file with additional letter spacing (eg. Farnsworth style)
 
 	cat book.txt | ./morsewav.py -o book.wav -l 200
