@@ -3,6 +3,7 @@ morsewav.py
 
 A morse code wav file generator written in python by Cary Dreelan VK5CD
 
+* GNU GPL Licensed
 * Based on version at http://svn.python.org/projects/python/trunk/Demo/scripts/morse.py
 * Improvements:
 * Adding key click filter (ramp amplitude up/down)
