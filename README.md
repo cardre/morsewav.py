@@ -5,15 +5,17 @@ A morse code wav file generator written in python by Cary Dreelan VK5CD
 
 * GNU GPL Licensed
 * Based on version at http://svn.python.org/projects/python/trunk/Demo/scripts/morse.py
-* Improvements:
+
+Improvements:
+
 * Adding key click filter (ramp amplitude up/down)
+* Cached sinusodial waves for faster performance
 * More command line options:
 * - Specify sample rate
 * - Frequency of morse signal
 * - Amplitude of signal
 * - Words per minute
 * - Letter spacing as percentage (allowing Farnsworth style)
-* Cached sinusodial waves for faster performance
 
 Command line options
 --------------------
