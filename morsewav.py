@@ -187,9 +187,9 @@ def main():
 	
 	# Play out morse
 	for line in source:
-		mline = morse(line)
+		mline, vmline = morse(line)
 		if verbose:
-			print mline
+			print vmline
 		play(mline, dev, morse_freq_hz, amplitude, sample_rate, dot_samples, dah_samples, letter_spacing)
 		if hasattr(dev, 'wait'):
 			dev.wait()
@@ -197,13 +197,14 @@ def main():
 
 # Convert a string to morse code with \001 between the characters in the string.
 def morse(line):
-	res = ''
+	vres = res = ''
 	for c in line:
 		try:
 			res += morsetab[c] + '\001'
+			vres += morsetab[c] + ' '
 		except KeyError:
 			pass
-	return res
+	return res, vres
 
 # Play a line of morse code.
 def play(line, dev, morse_freq_hz, amplitude, sample_rate, dot_samples, dah_samples, letter_spacing):
