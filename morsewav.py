@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 
 # Morse code wav file generator
 # =============================
@@ -26,7 +26,7 @@
 # [ words ]			# Actual words to be converted, either as cmd line options, or can be stdin
 
 # Examples
-# 
+#
 # Generate 'hello_world.wav' test file with default parameters in current directory:
 #	./morsewav.py -o hello_world.wav hello world
 #
@@ -43,11 +43,11 @@
 # Sending the word PARIS is standard way of determining morse words per minute
 # PARIS in morse contains 50 elements with a dit/dot taking one element
 # morse_wpm = 60 (seconds) / ( dot_msecs * 50 (elements) / 1000 msecs )
-# dot_msecs = 60 (seconds) * 1000 msecs / ( morse_wpm * 50 (elements) ) 
+# dot_msecs = 60 (seconds) * 1000 msecs / ( morse_wpm * 50 (elements) )
 # or simplified
 #  T = 1200 / W
 
-import sys, math, audiodev
+import sys, math
 
 # Default constants
 DEF_SAMPLE_RATE = 22050
@@ -146,12 +146,12 @@ def main():
 			verbose = True
 
 	if verbose:
-		print "File =", dev
-		print "morse_freq_hz =", morse_freq_hz
-		print "sample_rate =", sample_rate
-		print "amplitude =", amplitude
-		print "words_per_min =", words_per_min
-		print "letter_spacing =", letter_spacing
+		print( "File =", dev )
+		print( "morse_freq_hz =", morse_freq_hz )
+		print( "sample_rate =", sample_rate )
+		print( "amplitude =", amplitude )
+		print( "words_per_min =", words_per_min )
+		print( "letter_spacing =", letter_spacing )
 
 	# If no device specified, try open audio device (on Linux, won't work on Mac/Win?)
 	if not dev:
@@ -175,21 +175,21 @@ def main():
 	# Calculate speed of morse based on WPM (Dot Time = 1200 / WPM)
 	dot_msecs =  1200 / words_per_min # Time in msecs a dot should take (25 wpm = 48 msecs)
 	dot_samples = int( float(dot_msecs) / 1000 * sample_rate )
-	dah_samples = 3 * dot_samples
+	dah_samples = int( 3 * dot_samples )
 
 	if verbose:
-		print "dot_msecs =", dot_msecs
-		print "dot_samples =", dot_samples
-		print "dah_samples =", dah_samples
-		
-	# CD - add space in front (time for squelch to open?) of 0.5s
+		print( "dot_msecs =", dot_msecs )
+		print( "dot_samples =", dot_samples )
+		print( "dah_samples =", dah_samples )
+
+	# Add space in front (time for squelch to open?) of 0.5s
 	pause(dev, sample_rate / 2)
-	
+
 	# Play out morse
 	for line in source:
 		mline, vmline = morse(line)
 		if verbose:
-			print vmline
+			print( vmline )
 		play(mline, dev, morse_freq_hz, amplitude, sample_rate, dot_samples, dah_samples, letter_spacing)
 		if hasattr(dev, 'wait'):
 			dev.wait()
@@ -221,39 +221,42 @@ def play(line, dev, morse_freq_hz, amplitude, sample_rate, dot_samples, dah_samp
 		pause(dev, dot_samples)
 
 def sinusodial(dev, morse_freq_hz, amplitude, sample_rate, length, ramp_samples):
-	
+
 	# Add in ramp up/down of sinusodial wave to avoid clicks
 	# This also means using cos instead of sine to allow smother ramping start/stop points
 
-	res = ''
+	res = bytearray()
 	sample = 0
 
 	# Calculate the amount we need to increase pi for each sample
-	radian_inc = 2 * math.pi * morse_freq_hz 
-	
+	radian_inc = 2 * math.pi * morse_freq_hz
+
 	# Ramp up
 	for i in range(ramp_samples):
 		val = int(math.cos(radian_inc * sample / sample_rate ) * amplitude * i / ramp_samples )
-		res += chr(val & 255) + chr((val >> 8) & 255)
+		res.append( val & 255 )
+		res.append( (val >> 8) & 255 )
 		sample += 1
 
 	# Full amplitude
 	for i in range(length - ramp_samples * 2):
 		val = int(math.cos(radian_inc * sample / sample_rate ) * amplitude )
-		res += chr(val & 255) + chr((val >> 8) & 255)
+		res.append( val & 255 )
+		res.append( (val >> 8) & 255 )
 		sample += 1
 
 	# Ramp down
 	for i in range(ramp_samples):
 		val = int(math.cos(radian_inc * sample / sample_rate ) * amplitude * (ramp_samples - i) / ramp_samples )
-		res += chr(val & 255) + chr((val >> 8) & 255) 
+		res.append( val & 255 )
+		res.append( (val >> 8) & 255 )
 		sample += 1
 
 	return res
 
 
 def pause(dev, length):
-	dev.writeframesraw('\0' * length * 2) # * 2 bytes p/sample
+	dev.writeframesraw( bytearray( int( length * 2 ) ) ) # * 2 bytes p/sample
 
 if __name__ == '__main__':
 	main()
