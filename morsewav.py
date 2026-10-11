@@ -110,12 +110,13 @@ morsetab = {
 def main():
 	import getopt
 	global verbose
+	global dot_bytes, dah_bytes, word_pause_bytes, letter_pause_bytes, symbol_pause_bytes
 
 	try:
-		opts, args = getopt.getopt(sys.argv[1:], 'o:f:s:w:a:l:v')
+		opts, args = getopt.getopt(sys.argv[1:], "o:f:s:w:a:l:v")
 	except getopt.error:
 		sys.stderr.write('Usage ' + sys.argv[0] +
-			' [-o outfile] [-f morse_freq_hz] [-s sample_rate] [-w words_per_minute] [-a amplitude (0-32767)] [-l letter spacing % (100+)] [-v verbose] [ words ] ...\n')
+			' -o outfile [-f morse_freq_hz] [-s sample_rate] [-w words_per_minute] [-a amplitude (0-32767)] [-l letter spacing % (100+)] [-v verbose] [ words ] ...\n')
 		sys.exit(1)
 
 	dev = None
@@ -135,13 +136,13 @@ def main():
 		if o == '-f':
 			morse_freq_hz = float(a)
 		if o == '-s':
-			sample_rate = int(a)
+			sample_rate = int(float(a))
 		if o == '-w':
-			words_per_min = int(a)
+			words_per_min = int(float(a))
 		if o == '-a':
-			amplitude = int(a)
+			amplitude = int(float(a))
 		if o == '-l':
-			letter_spacing = int(a)
+			letter_spacing = int(float(a))
 		if o == '-v':
 			verbose = True
 
@@ -154,20 +155,23 @@ def main():
 		print( "letter_spacing =", letter_spacing )
 
 	# If no device specified, try open audio device (on Linux, won't work on Mac/Win?)
-	if not dev:
-		import audiodev
-		dev = audiodev.AudioDev()
-		dev.setoutrate(sample_rate)
-		dev.setsampwidth(2)
-		dev.setnchannels(1)
-		dev.close = dev.stop
-		dev.writeframesraw = dev.writeframes
+	# if not output_filename:
+	# 	# TODO - NEEDS TO BE UPDATED TO pyaudio for python3 # apt install python3-pyaudio on rpi?
+	# 	import audiodev
+	# 	dev = audiodev.AudioDev()
+	# 	dev.setoutrate(sample_rate)
+	# 	dev.setsampwidth(2)
+	# 	dev.setnchannels(1)
+	# 	dev.close = dev.stop
+	# 	dev.writeframesraw = dev.writeframes
+	# else:
+	# 	dev = open(output_filename, 'wb')
 
 	# Get the words to be converted either from command line or stdin
 	if args:
 		source = [' '.join(args)]
 	else:
-		source = iter(sys.stdin.readline, '')
+		source = sys.stdin
 
 	# Set file/dev sample rate & parameters
 	dev.setparams((1, 2, sample_rate, 0, 'NONE', 'not compressed'))
@@ -178,85 +182,117 @@ def main():
 	dah_samples = int( 3 * dot_samples )
 
 	if verbose:
-		print( "dot_msecs =", dot_msecs )
-		print( "dot_samples =", dot_samples )
-		print( "dah_samples =", dah_samples )
+		print( "dot_msecs =", dot_msecs)
+		print( "dot_samples =", dot_samples)
+		print( "dah_samples =", dah_samples)
+	
+	# Pre-generate required samples to increase performance (and thus some minimal extra memory requirements)
+	# - based on 1 time unit = pause between symbol = 1 unit, letter = 3 * F units, words = 7 * F units (F=Farnsworth)
+	ramp_samples = int( dot_samples * RAMP_SAMPLE_PERCENT )
+	dot_bytes = sinusodial(dev, morse_freq_hz, amplitude, sample_rate, dot_samples, ramp_samples)
+	dah_bytes = sinusodial(dev, morse_freq_hz, amplitude, sample_rate, dah_samples, ramp_samples)
+	symbol_pause_bytes =  b'\0' * dot_samples * 2 # 2 bytes p/sample - always same, not changed for Farnsworth
+	pause_samples = int ( ( dot_samples ) * letter_spacing / 100 ) # to allow for farnsworth percentage spacing for letters/words
+	letter_pause_bytes = b'\0' * 3 * pause_samples * 2 # 2 bytes p/sample
+	word_pause_bytes = b'\0' * (7-3-3) * pause_samples * 2  # 2 bytes p/sample (-3-3 because letter pause before/after ' ')
 
-	# Add space in front (time for squelch to open?) of 0.5s
-	pause(dev, sample_rate / 2)
-
-	# Play out morse
+	# Generate morse for each input line
+	mline = vmline = ''
 	for line in source:
-		mline, vmline = morse(line)
+		mline, vmline = morse(line, dev)
 		if verbose:
 			print( vmline )
-		play(mline, dev, morse_freq_hz, amplitude, sample_rate, dot_samples, dah_samples, letter_spacing)
+		generate(mline, dev)
 		if hasattr(dev, 'wait'):
 			dev.wait()
 	dev.close()
 
 # Convert a string to morse code with \001 between the characters in the string.
-def morse(line):
+def morse(line, dev):
 	vres = res = ''
 	for c in line:
 		try:
 			res += morsetab[c] + '\001'
 			vres += morsetab[c] + ' '
+			if c == ' ': 
+				generate(res, dev)
+				res = ''
 		except KeyError:
+			generate(res, dev)
+			res = ''
 			pass
 	return res, vres
 
-# Play a line of morse code.
-def play(line, dev, morse_freq_hz, amplitude, sample_rate, dot_samples, dah_samples, letter_spacing):
-	ramp_samples = int( dot_samples * RAMP_SAMPLE_PERCENT )
-	dot_bytes = sinusodial(dev, morse_freq_hz, amplitude, sample_rate, dot_samples, ramp_samples)
-	dah_bytes = sinusodial(dev, morse_freq_hz, amplitude, sample_rate, dah_samples, ramp_samples)
-	for c in line:
+# Generate morse code for supplied word's worth of morse chars
+def generate(morse_str, dev):
+	global dot_bytes, dah_bytes, symbol_pause_bytes, word_pause_bytes
+	global max_play_sample_bytes, generated_sample_bytes, finish_early
+	morse_samples = b''
+
+	# Get the samples together for this morse word string
+	prev_dot_or_dash = False
+	for c in morse_str:
+		# print(f"c = {c} 0x{ord(c):02X}")
 		if c == '.':
-			dev.writeframesraw( dot_bytes )
+			if prev_dot_or_dash: morse_samples += symbol_pause_bytes
+			prev_dot_or_dash = True
+			morse_samples += dot_bytes
 		elif c == '-':
-			dev.writeframesraw( dah_bytes )
-		else:					# space
-			pause(dev, int ( ( dah_samples + dot_samples ) * letter_spacing / 100 ) )
-		pause(dev, dot_samples)
+			if prev_dot_or_dash: morse_samples += symbol_pause_bytes
+			prev_dot_or_dash = True
+			morse_samples += dah_bytes
+		elif c == '\001':
+			# Space between letters
+			morse_samples += letter_pause_bytes
+			prev_dot_or_dash = False
+		else:
+			# Space between words
+			morse_samples += word_pause_bytes
+			prev_dot_or_dash = False
+
+	# Output it
+	write_samples( dev, morse_samples )
 
 def sinusodial(dev, morse_freq_hz, amplitude, sample_rate, length, ramp_samples):
-
+	
 	# Add in ramp up/down of sinusodial wave to avoid clicks
 	# This also means using cos instead of sine to allow smother ramping start/stop points
 
-	res = bytearray()
+	res = b''
 	sample = 0
 
 	# Calculate the amount we need to increase pi for each sample
-	radian_inc = 2 * math.pi * morse_freq_hz
-
+	radian_inc = 2 * math.pi * morse_freq_hz 
+	
 	# Ramp up
 	for i in range(ramp_samples):
 		val = int(math.cos(radian_inc * sample / sample_rate ) * amplitude * i / ramp_samples )
-		res.append( val & 255 )
-		res.append( (val >> 8) & 255 )
+		res += val.to_bytes(2,'little',signed=True)
+		# res += chr(val & 255) + chr((val >> 8) & 255)
 		sample += 1
 
 	# Full amplitude
 	for i in range(length - ramp_samples * 2):
 		val = int(math.cos(radian_inc * sample / sample_rate ) * amplitude )
-		res.append( val & 255 )
-		res.append( (val >> 8) & 255 )
+		res += val.to_bytes(2,'little',signed=True)
+		# res += chr(val & 255) + chr((val >> 8) & 255)
 		sample += 1
 
 	# Ramp down
 	for i in range(ramp_samples):
 		val = int(math.cos(radian_inc * sample / sample_rate ) * amplitude * (ramp_samples - i) / ramp_samples )
-		res.append( val & 255 )
-		res.append( (val >> 8) & 255 )
+		res += val.to_bytes(2,'little',signed=True)
+		# res += chr(val & 255) + chr((val >> 8) & 255) 
 		sample += 1
 
 	return res
 
+# def pause(length):
+# 	return('\0' * length * 2) # * 2 bytes p/sample
 
-def pause(dev, length):
-	dev.writeframesraw( bytearray( int( length * 2 ) ) ) # * 2 bytes p/sample
+def write_samples(dev, bytes):
+	dev.writeframesraw(bytes)
+
 
 if __name__ == '__main__':
 	main()
